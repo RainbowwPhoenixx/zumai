@@ -1,5 +1,6 @@
 use crate::libzuma::*;
 
+#[derive(Clone, Copy)]
 pub enum BotMove {
     Nothing,
     Shoot(Point),
@@ -36,7 +37,7 @@ pub fn reachable_balls(frog: &Frog, balls: &BallSequence) -> Vec<Ball> {
 
             let dist_sq_circle_to_line = (projected_point.x - ball_obstacle.coordinates.x).powi(2)
                 + (projected_point.y - ball_obstacle.coordinates.y).powi(2);
-            let radius_sq = 30_f32.powi(2);
+            let radius_sq = 31_f32.powi(2);
             if dist_sq_circle_to_line < radius_sq && k_leeway < k && k < 1. - k_leeway {
                 ball_has_line_of_sight = false;
                 break;
@@ -108,34 +109,40 @@ fn find_palidromes(balls: &BallSequence) -> Vec<Palindrome> {
     palindromes
 }
 
-pub fn suggest_shot_color_collision(frog: Frog, balls: &BallSequence) -> BotMove {
+pub fn suggest_shot_color(frog: Frog, balls: &BallSequence) -> BotMove {
+    // Memo contains the last 2 shots that resulted in balls popping
+    // (to avoid reshooting in the same place)
     if balls.balls.len() == 0 {
         return BotMove::Nothing;
     }
 
-    let reachable_balls = reachable_balls(&frog, balls);
-
-    // Find the longest run of the same color ball
-    let mut ball_run_end = None;
-    let mut ball_run_count = 0;
-    let mut current_ball_count = 0;
-    for (i, ball) in reachable_balls.iter().enumerate() {
-        if ball.color == frog.active_ball {
-            current_ball_count += 1;
-        } else if current_ball_count > ball_run_count {
-            ball_run_end = Some(i - 1);
-            ball_run_count = current_ball_count;
-            current_ball_count = 0;
+    // Transform the ball sequence into a [(color, count, ball_idx)]
+    let mut rle_balls = vec![];
+    for (i, ball) in balls.balls.iter().enumerate() {
+        match rle_balls.last() {
+            Some(&(color, count, _)) if color == ball.color => {
+                (*rle_balls.last_mut().unwrap()).1 = count + 1
+            }
+            _ => rle_balls.push((ball.color, 1, i)),
         }
     }
+    rle_balls.sort_by_key(|k| -(k.1 as i32));
+    let reachable_balls = reachable_balls(&frog, balls);
 
-    if current_ball_count > ball_run_count {
-        ball_run_end = Some(reachable_balls.len() - 1);
+    let mut ball_to_shoot = None;
+    for (color, count, idx) in rle_balls {
+        if color == frog.active_ball {
+            // Inverting this next condition might improve perf
+            if (idx..idx + count).any(|i| reachable_balls.contains(&balls.balls[i])) {
+                ball_to_shoot = Some(idx + count - 1);
+                break;
+        }
+    }
     }
 
     // Determine move
-    match ball_run_end {
-        Some(ball_idx) => BotMove::Shoot(reachable_balls[ball_idx].coordinates),
+    match ball_to_shoot {
+        Some(ball_idx) => BotMove::Shoot(balls.balls[ball_idx].coordinates),
         None => BotMove::Shoot(reachable_balls[reachable_balls.len() - 1].coordinates),
     }
 }

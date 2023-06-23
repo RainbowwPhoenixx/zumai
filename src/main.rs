@@ -3,7 +3,7 @@ mod mem_reader;
 use iced::{
     executor,
     widget::{
-        canvas::{self, Cursor, Geometry, Path},
+        canvas::{self, stroke, Cursor, Geometry, Path, Stroke},
         column, row, Button, Canvas, Text,
     },
     Application, Color, Command, Element, Length, Rectangle, Settings, Subscription, Theme,
@@ -32,6 +32,7 @@ pub struct AiInterface {
     attached: Option<bool>,
     win_manager: WmCtl,
     zuma_reader: mem_reader::ZumaReader,
+    bot_move: bot::BotMove,
 
     // Time that the bot took to play/think its move
     window_find_time: std::time::Duration,
@@ -55,6 +56,7 @@ impl Application for AiInterface {
                 attached: None,
                 win_manager: WmCtl::connect().unwrap(),
                 zuma_reader: mem_reader::ZumaReader::new(),
+                bot_move: bot::BotMove::Nothing,
                 window_find_time: std::time::Duration::from_secs(0),
                 bot_time_mem_read: std::time::Duration::from_secs(0),
                 bot_time_think: std::time::Duration::from_secs(0),
@@ -108,10 +110,11 @@ impl Application for AiInterface {
                     }
 
                     self.bot_time_mem_read = before.elapsed() - self.window_find_time;
-                    let bot_shot = bot::suggest_shot_color_collision(
+                    let bot_shot = bot::suggest_shot_color(
                         self.zuma_reader.frog.unwrap(),
                         &self.zuma_reader.game_state,
                     );
+                    self.bot_move = bot_shot;
 
                     self.bot_time_think =
                         before.elapsed() - self.window_find_time - self.bot_time_mem_read;
@@ -220,15 +223,6 @@ impl<Message> canvas::Program<Message> for AiInterface {
                 Color::BLACK,
             );
 
-            if let Some(frog) = self.zuma_reader.frog {
-                frame.fill_text(canvas::Text {
-                    content: format!("{:?}", frog.active_ball),
-                    position: iced::Point::new(frog.location.x, frog.location.y),
-                    color: Color::WHITE,
-                    ..Default::default()
-                })
-            }
-
             let reachable_balls = bot::reachable_balls(
                 &libzuma::Frog {
                     location: libzuma::Point { x: 320., y: 240. },
@@ -245,6 +239,34 @@ impl<Message> canvas::Program<Message> for AiInterface {
                     Some(format!("{}", i)),
                     reachable_balls.contains(ball),
                 );
+            }
+
+            if let Some(frog) = self.zuma_reader.frog {
+                let frog_pos = iced::Point::new(frog.location.x, frog.location.y);
+                frame.fill_text(canvas::Text {
+                    content: format!("{:?}", frog.active_ball),
+                    position: frog_pos,
+                    color: Color::WHITE,
+                    ..Default::default()
+                });
+
+                match self.bot_move {
+                    bot::BotMove::Shoot(bot_coords) => {
+                        let coords = iced::Point {
+                            x: bot_coords.x,
+                            y: bot_coords.y,
+                        };
+                        let line = &Path::line(frog_pos, coords);
+                        let stroke = Stroke {
+                            width: 5.,
+                            style: stroke::Style::Solid(Color::from_rgb8(255, 255, 0)),
+                            ..Stroke::default()
+                        };
+
+                        frame.stroke(&line, stroke);
+                    }
+                    _ => {}
+                }
             }
         })]
     }

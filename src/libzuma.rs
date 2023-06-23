@@ -29,6 +29,7 @@ pub struct Ball {
     pub is_reachable: bool, // false if it is in a tunnel for example
     pub color: BallColor,
     pub effect: BallEffect,
+    pub id: u32,
 }
 
 #[derive(Clone, Debug)]

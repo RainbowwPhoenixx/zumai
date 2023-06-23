@@ -13,7 +13,7 @@ const MOUSE_COORDS_OFFSETS: [usize; 4] = [0x59F4A4, 0x320, 0x10, 0xE0];
 #[derive(Clone, Copy, Debug)]
 struct MemBall {
     _padding_0x0: [u8; 4],
-    _global_ball_number: u32,
+    global_ball_number: u32,
     color: u32,
     _distance_along_path: f32,
     _padding_0x10: [u8; 12],
@@ -162,6 +162,7 @@ impl ZumaReader {
             },
             effect: number_to_effect(mem_ball.effect).ok()?,
             is_reachable: true,
+            id: mem_ball.global_ball_number,
         })
     }
 
