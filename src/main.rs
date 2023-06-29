@@ -4,7 +4,7 @@ use iced::{
     executor,
     widget::{
         canvas::{self, stroke, Cursor, Geometry, Path, Stroke},
-        column, row, Button, Canvas, Text,
+        checkbox, column, row, Button, Canvas, Text,
     },
     Application, Color, Command, Element, Length, Rectangle, Settings, Subscription, Theme,
 };
@@ -19,9 +19,13 @@ fn main() -> iced::Result {
     })
 }
 
+const BACK_TO_MENU_COORDS: (i32, i32) = (320, 360);
+const NEW_GAME_COORDS: (i32, i32) = (320, 450);
+
 #[derive(Clone, Debug)]
 pub enum Message {
     AttachedChanged(bool),
+    AutoResetChecked(bool),
     TryAttach,
     UpdateZumaGameState,
     RefreshCanvas,
@@ -33,6 +37,8 @@ pub struct AiInterface {
     win_manager: WmCtl,
     zuma_reader: mem_reader::ZumaReader,
     bot_move: bot::BotMove,
+
+    auto_reset: bool,
 
     // Time that the bot took to play/think its move
     window_find_time: std::time::Duration,
@@ -57,6 +63,7 @@ impl Application for AiInterface {
                 win_manager: WmCtl::connect().unwrap(),
                 zuma_reader: mem_reader::ZumaReader::new(),
                 bot_move: bot::BotMove::Nothing,
+                auto_reset: false,
                 window_find_time: std::time::Duration::from_secs(0),
                 bot_time_mem_read: std::time::Duration::from_secs(0),
                 bot_time_think: std::time::Duration::from_secs(0),
@@ -81,6 +88,7 @@ impl Application for AiInterface {
             Message::AttachedChanged(new_attached) => {
                 self.attached = Some(new_attached);
             }
+            Message::AutoResetChecked(state) => self.auto_reset = state,
             Message::UpdateZumaGameState => {
                 if let Some(true) = self.attached {
                     self.zuma_reader.update_frog_follow_eyes();
@@ -121,6 +129,19 @@ impl Application for AiInterface {
 
                     self.zuma_reader.update_paused();
                     if self.zuma_reader.paused {
+                        if self.auto_reset && self.zuma_reader.game_state.balls.len() == 0 {
+                            // We've lost, attempt to restart automatically
+                            let click_x = zuma_win_x - 1 as i32 + BACK_TO_MENU_COORDS.0;
+                            let click_y = zuma_win_y - 38 + BACK_TO_MENU_COORDS.1;
+                            mki::Mouse::Left.click_at(click_x as i32, click_y as i32);
+
+                            std::thread::sleep_ms(1000);
+
+                            // We've lost, attempt to restart automatically
+                            let click_x = zuma_win_x - 1 as i32 + NEW_GAME_COORDS.0;
+                            let click_y = zuma_win_y - 38 + NEW_GAME_COORDS.1;
+                            mki::Mouse::Left.click_at(click_x as i32, click_y as i32);
+                        }
                         return Command::none();
                     }
 
@@ -167,6 +188,9 @@ impl Application for AiInterface {
                 .on_press(Message::TryAttach);
 
             content = content.push(button);
+        } else {
+            let checkbox = checkbox("Auto reset", self.auto_reset, Message::AutoResetChecked);
+            content = content.push(checkbox);
         }
 
         let stats = column![
@@ -223,23 +247,7 @@ impl<Message> canvas::Program<Message> for AiInterface {
                 Color::BLACK,
             );
 
-            let reachable_balls = bot::reachable_balls(
-                &libzuma::Frog {
-                    location: libzuma::Point { x: 320., y: 240. },
-                    active_ball: libzuma::BallColor::Blue,
-                    next_ball: libzuma::BallColor::Blue,
-                },
-                &self.zuma_reader.game_state,
-            );
-
-            for (i, ball) in self.zuma_reader.game_state.balls.iter().enumerate() {
-                draw_ball(
-                    frame,
-                    ball,
-                    Some(format!("{}", i)),
-                    reachable_balls.contains(ball),
-                );
-            }
+            let mut reachable_balls = vec![];
 
             if let Some(frog) = self.zuma_reader.frog {
                 let frog_pos = iced::Point::new(frog.location.x, frog.location.y);
@@ -249,6 +257,11 @@ impl<Message> canvas::Program<Message> for AiInterface {
                     color: Color::WHITE,
                     ..Default::default()
                 });
+
+                reachable_balls = bot::reachable_balls(
+                    &frog,
+                    &self.zuma_reader.game_state,
+                );
 
                 match self.bot_move {
                     bot::BotMove::Shoot(bot_coords) => {
@@ -267,6 +280,15 @@ impl<Message> canvas::Program<Message> for AiInterface {
                     }
                     _ => {}
                 }
+            }
+
+            for (i, ball) in self.zuma_reader.game_state.balls.iter().enumerate() {
+                draw_ball(
+                    frame,
+                    ball,
+                    Some(format!("{}", i)),
+                    reachable_balls.contains(ball),
+                );
             }
         })]
     }
