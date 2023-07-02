@@ -247,6 +247,19 @@ impl<Message> canvas::Program<Message> for AiInterface {
                 Color::BLACK,
             );
 
+            for point in &self.zuma_reader.game_state.curve.points {
+                frame.fill(
+                    &Path::circle(
+                        iced::Point {
+                            x: point.x,
+                            y: point.y,
+                        },
+                        1.,
+                    ),
+                    Color::WHITE,
+                );
+            }
+
             let mut reachable_balls = vec![];
 
             if let Some(frog) = self.zuma_reader.frog {
@@ -258,10 +271,7 @@ impl<Message> canvas::Program<Message> for AiInterface {
                     ..Default::default()
                 });
 
-                reachable_balls = bot::reachable_balls(
-                    &frog,
-                    &self.zuma_reader.game_state,
-                );
+                reachable_balls = bot::reachable_balls(&frog, &self.zuma_reader.game_state);
 
                 match self.bot_move {
                     bot::BotMove::Shoot(bot_coords) => {

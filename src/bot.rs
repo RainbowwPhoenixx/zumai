@@ -7,7 +7,7 @@ pub enum BotMove {
     SwapShoot(Point),
 }
 
-pub fn reachable_balls(frog: &Frog, balls: &BallSequence) -> Vec<Ball> {
+pub fn reachable_balls(frog: &Frog, balls: &GameState) -> Vec<Ball> {
     let mut reachable_balls = vec![];
 
     for ball_src in balls.balls.iter() {
@@ -72,7 +72,7 @@ impl Palindrome {
     }
 }
 
-fn find_palidromes(balls: &BallSequence) -> Vec<Palindrome> {
+fn find_palidromes(balls: &GameState) -> Vec<Palindrome> {
     // Transform the ball sequence into a [(color, count, ball_idx)]
     let mut rle_balls = vec![];
     for (i, ball) in balls.balls.iter().enumerate() {
@@ -109,16 +109,56 @@ fn find_palidromes(balls: &BallSequence) -> Vec<Palindrome> {
     palindromes
 }
 
-pub fn suggest_shot_color(frog: Frog, balls: &BallSequence) -> BotMove {
+// Compute the future position of the ball based on travel time
+// TODO: add an adjustment along the normal of the track towards the frog
+// (to make aim better in situations where the track isn't perfectly perpandicular to the frog)
+pub fn adjust_for_travel_time(frog: &Frog, state: &GameState, target_idx: usize) -> Point {
+    let target_ball = &state.balls[target_idx];
+
+    // Compute travel time
+    let dist_sq = (frog.location.x - target_ball.coordinates.x).powi(2)
+        + (frog.location.y - target_ball.coordinates.y).powi(2);
+    let dist = dist_sq.sqrt();
+    let travel_time = dist / frog.ball_exit_speed;
+
+    // Determine ball speed
+    // TODO: only compute stuff when needed
+    // If reversing and touching the end: backwards speed
+    // else if touching the start: forward speed
+    let mut comparison = &state.balls[0];
+    let gap_before_start = state.balls[..target_idx].iter().any(|ball| {
+        let res = comparison.dist_sq(ball) > 32.5_f32.powi(2);
+        comparison = ball;
+        res
+    });
+    let mut comparison = &state.balls[0];
+    let gap_before_end = state.balls[target_idx..].iter().any(|ball| {
+        let res = comparison.dist_sq(ball) > 32.5_f32.powi(2);
+        comparison = ball;
+        res
+    });
+    let ball_speed = match (state.backwards_time_left > 0, gap_before_end, gap_before_start) {
+        (true, false, _) => state.back_speed,
+        (false, _, false) => state.forward_speed,
+        _ => 0.0,
+    };
+
+    // Compute ball distance within that time
+    state
+        .curve
+        .get_pos_from_dist(target_ball.distance_along_path + ball_speed * travel_time)
+}
+
+pub fn suggest_shot_color(frog: Frog, state: &GameState) -> BotMove {
     // Memo contains the last 2 shots that resulted in balls popping
     // (to avoid reshooting in the same place)
-    if balls.balls.len() == 0 {
+    if state.balls.len() == 0 {
         return BotMove::Nothing;
     }
 
     // Transform the ball sequence into a [(color, count, ball_idx)]
     let mut rle_balls = vec![];
-    for (i, ball) in balls.balls.iter().enumerate() {
+    for (i, ball) in state.balls.iter().enumerate() {
         match rle_balls.last() {
             Some(&(color, count, _)) if color == ball.color => {
                 (*rle_balls.last_mut().unwrap()).1 = count + 1
@@ -127,27 +167,30 @@ pub fn suggest_shot_color(frog: Frog, balls: &BallSequence) -> BotMove {
         }
     }
     rle_balls.sort_by_key(|k| -(k.1 as i32));
-    let reachable_balls = reachable_balls(&frog, balls);
+    let reachable_balls = reachable_balls(&frog, state);
 
     let mut ball_to_shoot = None;
     for (color, count, idx) in rle_balls {
         if color == frog.active_ball {
-            // Inverting this next condition might improve perf
-            if (idx..idx + count).any(|i| reachable_balls.contains(&balls.balls[i])) {
-                ball_to_shoot = Some(idx + count - 1);
+            let ball_group = &state.balls[idx..idx + count];
+            let lowest_reachable_pos = reachable_balls
+                .iter()
+                .position(|ball| ball_group.contains(&ball));
+            if let Some(best_pos) = lowest_reachable_pos {
+                ball_to_shoot = Some(best_pos);
                 break;
+            }
         }
     }
-    }
 
-    // Determine move
-    match ball_to_shoot {
-        Some(ball_idx) => BotMove::Shoot(balls.balls[ball_idx].coordinates),
-        None => BotMove::Shoot(reachable_balls[reachable_balls.len() - 1].coordinates),
-    }
+    let ball_to_shoot = ball_to_shoot.unwrap_or(reachable_balls.len() - 1);
+    // Transform the index into an index of state.balls
+    let ball_to_shoot = state.balls.iter().position(|&ball| ball == reachable_balls[ball_to_shoot]).unwrap();
+
+    BotMove::Shoot(adjust_for_travel_time(&frog, state, ball_to_shoot))
 }
 
-pub fn suggest_shot_palidrome_simple(frog: Frog, balls: &BallSequence) -> BotMove {
+pub fn suggest_shot_palidrome_simple(frog: Frog, balls: &GameState) -> BotMove {
     if balls.balls.len() < 4 {
         return BotMove::Nothing;
     }

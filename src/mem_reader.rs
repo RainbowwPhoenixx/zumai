@@ -9,13 +9,15 @@ const STREAM_PARENT_OFFSETS: [usize; 2] = [0x83FE00, 0x0]; // I think this is a 
 
 const MOUSE_COORDS_OFFSETS: [usize; 4] = [0x59F4A4, 0x320, 0x10, 0xE0];
 
+const GAME_LOCATION: &str = "xxx";
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 struct MemBall {
     _padding_0x0: [u8; 4],
     global_ball_number: u32,
     color: u32,
-    _distance_along_path: f32,
+    distance_along_path: f32,
     _padding_0x10: [u8; 12],
     x: f32,
     y: f32,
@@ -88,15 +90,31 @@ struct MemBallStream {
     slowed_cooldown: u32,
     reverse_cooldown: u32,
     balls_shot: u32,
-    speed_thing: f32,
+    balls_speed: f32,
     distance_from_start: u32,
     _padding_0xx: [u8; 4],
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+struct MemLvlData {
+    _padding_0x0: [u8; 8],
+    str_level_name: [u8; 0x1C],
+    str_level_dispname: [u8; 0x1C],
+    ptr_bg_img_path: u32,
+    _padding_0x44: [u8; 0x1C],
+    frogx: u32,
+    frogy: u32,
+    _padding_0x68: [u8; 0x48],
+    ptr_filepath_curv1: u32,
+    _padding_0xb4: [u8; 0x78],
+    ptr_filepath_curv2: u32,
 }
 
 #[derive(Debug)]
 pub struct ZumaReader {
     pub process_handle: Option<ProcessHandle>,
-    pub game_state: BallSequence,
+    pub game_state: GameState,
     pub frog_follow_eyes: Option<bool>,
     pub mouse_coords: Option<(u32, u32)>,
     pub frog: Option<Frog>,
@@ -107,7 +125,7 @@ impl ZumaReader {
     pub fn new() -> Self {
         Self {
             process_handle: None,
-            game_state: BallSequence { balls: vec![] },
+            game_state: GameState::new(),
             frog_follow_eyes: None,
             mouse_coords: None,
             frog: None,
@@ -162,6 +180,7 @@ impl ZumaReader {
             },
             effect: number_to_effect(mem_ball.effect).ok()?,
             is_reachable: true,
+            distance_along_path: mem_ball.distance_along_path,
             id: mem_ball.global_ball_number,
         })
     }
@@ -182,6 +201,7 @@ impl ZumaReader {
             _ => return,
         };
 
+        // Read the balls
         for i in 0..mem_stream_parent.ballstream_count {
             let mem_stream: MemBallStream = DataMember::new_offset(
                 self.process_handle.unwrap(),
@@ -189,6 +209,8 @@ impl ZumaReader {
             )
             .read()
             .unwrap();
+            self.game_state.forward_speed = mem_stream.balls_speed;
+            self.game_state.backwards_time_left = mem_stream.reverse_cooldown;
 
             // Get the linked list manager thingymajig
             let ball_linked_list: MemBallLinkedList = DataMember::new_offset(
@@ -214,6 +236,25 @@ impl ZumaReader {
                     None => return,
                 };
             }
+
+            // Read the curve file
+            let lvl_data: MemLvlData = DataMember::new_offset(
+                self.process_handle.unwrap(),
+                vec![mem_stream.ptr_level_data as usize],
+            )
+            .read()
+            .unwrap();
+            let curv_filepath: [u8; 50] = DataMember::new_offset(
+                self.process_handle.unwrap(),
+                vec![lvl_data.ptr_filepath_curv1 as usize],
+            )
+            .read()
+            .unwrap();
+            let idx = curv_filepath.iter().position(|&e| e == 0).unwrap();
+            let path = GAME_LOCATION.to_owned()
+                + &String::from_utf8(curv_filepath[..idx].into()).unwrap()
+                + ".dat";
+            self.game_state.curve.read_from_file(path);
         }
     }
 
@@ -260,6 +301,7 @@ impl ZumaReader {
                 },
                 active_ball: active_ball.color,
                 next_ball: next_ball.color,
+                ball_exit_speed: mem_frog.ball_exit_speed,
             })
         }
     }
