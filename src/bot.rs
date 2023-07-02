@@ -7,6 +7,33 @@ pub enum BotMove {
     SwapShoot(Point),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BotMode {
+    ColorBot,
+    PalindromeBreaker,
+}
+
+impl BotMode {
+    pub const ALL: &[Self] = &[Self::ColorBot, Self::PalindromeBreaker];
+}
+
+impl std::fmt::Display for BotMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BotMode::ColorBot => "Color matcher",
+            BotMode::PalindromeBreaker => "Simple palindrome breaker",
+        }
+        .fmt(f)
+    }
+}
+
+pub fn suggest_shot(frog: &Frog, state: &GameState, mode: BotMode) -> BotMove {
+    match mode {
+        BotMode::ColorBot => suggest_shot_color(frog, state),
+        BotMode::PalindromeBreaker => suggest_shot_palidrome_simple(frog, state),
+    }
+}
+
 pub fn reachable_balls(frog: &Frog, balls: &GameState) -> Vec<Ball> {
     let mut reachable_balls = vec![];
 
@@ -37,7 +64,7 @@ pub fn reachable_balls(frog: &Frog, balls: &GameState) -> Vec<Ball> {
 
             let dist_sq_circle_to_line = (projected_point.x - ball_obstacle.coordinates.x).powi(2)
                 + (projected_point.y - ball_obstacle.coordinates.y).powi(2);
-            let radius_sq = 31_f32.powi(2);
+            let radius_sq = 32_f32.powi(2);
             if dist_sq_circle_to_line < radius_sq && k_leeway < k && k < 1. - k_leeway {
                 ball_has_line_of_sight = false;
                 break;
@@ -59,12 +86,19 @@ struct Palindrome {
 }
 
 impl Palindrome {
-    fn get_breaking_len(&self) -> u32 {
-        let mut count = if self.sequence[0].1 > 1 { 1 } else { return 0 };
+    fn get_breaking_len(&self) -> f32 {
+        let mut count = if self.sequence[0].1 > 1 {
+            1.
+        } else {
+            return 0.;
+        };
 
         for item in &self.sequence {
             if item.1 > 3 {
-                count += 1;
+                count += 1.;
+            } else {
+                count += 0.5;
+                break;
             }
         }
 
@@ -137,7 +171,11 @@ pub fn adjust_for_travel_time(frog: &Frog, state: &GameState, target_idx: usize)
         comparison = ball;
         res
     });
-    let ball_speed = match (state.backwards_time_left > 0, gap_before_end, gap_before_start) {
+    let ball_speed = match (
+        state.backwards_time_left > 0,
+        gap_before_end,
+        gap_before_start,
+    ) {
         (true, false, _) => state.back_speed,
         (false, _, false) => state.forward_speed,
         _ => 0.0,
@@ -149,7 +187,7 @@ pub fn adjust_for_travel_time(frog: &Frog, state: &GameState, target_idx: usize)
         .get_pos_from_dist(target_ball.distance_along_path + ball_speed * travel_time)
 }
 
-pub fn suggest_shot_color(frog: Frog, state: &GameState) -> BotMove {
+pub fn suggest_shot_color(frog: &Frog, state: &GameState) -> BotMove {
     // Memo contains the last 2 shots that resulted in balls popping
     // (to avoid reshooting in the same place)
     if state.balls.len() == 0 {
@@ -185,23 +223,27 @@ pub fn suggest_shot_color(frog: Frog, state: &GameState) -> BotMove {
 
     let ball_to_shoot = ball_to_shoot.unwrap_or(reachable_balls.len() - 1);
     // Transform the index into an index of state.balls
-    let ball_to_shoot = state.balls.iter().position(|&ball| ball == reachable_balls[ball_to_shoot]).unwrap();
+    let ball_to_shoot = state
+        .balls
+        .iter()
+        .position(|&ball| ball == reachable_balls[ball_to_shoot])
+        .unwrap();
 
     BotMove::Shoot(adjust_for_travel_time(&frog, state, ball_to_shoot))
 }
 
-pub fn suggest_shot_palidrome_simple(frog: Frog, balls: &GameState) -> BotMove {
-    if balls.balls.len() < 4 {
+pub fn suggest_shot_palidrome_simple(frog: &Frog, state: &GameState) -> BotMove {
+    if state.balls.len() < 4 {
         return BotMove::Nothing;
     }
 
-    let reachable_balls = reachable_balls(&frog, balls);
-    let mut palindromes = find_palidromes(balls);
+    let reachable_balls = reachable_balls(&frog, state);
+    let mut palindromes = find_palidromes(state);
     palindromes.sort_by_key(|k| -(k.get_breaking_len() as i32));
 
     let mut target = None;
     for palindrome in palindromes {
-        let palindrome_center = balls.balls[palindrome.center];
+        let palindrome_center = state.balls[palindrome.center];
         if palindrome_center.color == frog.active_ball
             && reachable_balls.contains(&palindrome_center)
         {
@@ -210,9 +252,9 @@ pub fn suggest_shot_palidrome_simple(frog: Frog, balls: &GameState) -> BotMove {
         }
     }
 
-    // Determine move
-    match target {
-        Some(ball) => BotMove::Shoot(ball.coordinates),
-        None => BotMove::Shoot(reachable_balls[reachable_balls.len() - 1].coordinates),
-    }
+    let target = target.unwrap_or(reachable_balls[reachable_balls.len() - 1]);
+    // Transform the index into an index of state.balls
+    let ball_to_shoot = state.balls.iter().position(|&ball| ball == target).unwrap();
+
+    BotMove::Shoot(adjust_for_travel_time(&frog, state, ball_to_shoot))
 }

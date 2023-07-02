@@ -155,8 +155,8 @@ impl Curve {
         // The delta between consecutive points rotated by 90 degrees
         // is a pretty good normal
         Point {
-            x: self.points[idx+1].y - self.points[idx].y,
-            y: self.points[idx].x - self.points[idx+1].x,
+            x: self.points[idx + 1].y - self.points[idx].y,
+            y: self.points[idx].x - self.points[idx + 1].x,
         }
     }
 }

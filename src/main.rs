@@ -4,7 +4,7 @@ use iced::{
     executor,
     widget::{
         canvas::{self, stroke, Cursor, Geometry, Path, Stroke},
-        checkbox, column, row, Button, Canvas, Text,
+        checkbox, column, row, Button, Canvas, PickList, Slider, Text,
     },
     Application, Color, Command, Element, Length, Rectangle, Settings, Subscription, Theme,
 };
@@ -25,7 +25,10 @@ const NEW_GAME_COORDS: (i32, i32) = (320, 450);
 #[derive(Clone, Debug)]
 pub enum Message {
     AttachedChanged(bool),
-    AutoResetChecked(bool),
+    EnabledChanged(bool),
+    AutoResetChanged(bool),
+    ShootFreqChanged(u32),
+    ModeChanged(bot::BotMode),
     TryAttach,
     UpdateZumaGameState,
     RefreshCanvas,
@@ -34,14 +37,18 @@ pub enum Message {
 
 pub struct AiInterface {
     attached: Option<bool>,
-    win_manager: WmCtl,
     zuma_reader: mem_reader::ZumaReader,
     bot_move: bot::BotMove,
 
+    win_manager: WmCtl,
+    win_coords: Option<(i32, i32)>,
+
+    enabled: bool,
     auto_reset: bool,
+    shoot_frequency: u32, // in ms
+    mode: bot::BotMode,
 
     // Time that the bot took to play/think its move
-    window_find_time: std::time::Duration,
     bot_time_mem_read: std::time::Duration,
     bot_time_think: std::time::Duration,
     bot_time_play: std::time::Duration,
@@ -60,11 +67,14 @@ impl Application for AiInterface {
         (
             Self {
                 attached: None,
-                win_manager: WmCtl::connect().unwrap(),
                 zuma_reader: mem_reader::ZumaReader::new(),
                 bot_move: bot::BotMove::Nothing,
+                win_manager: WmCtl::connect().unwrap(),
+                win_coords: None,
+                enabled: true,
                 auto_reset: false,
-                window_find_time: std::time::Duration::from_secs(0),
+                shoot_frequency: 250,
+                mode: bot::BotMode::ColorBot,
                 bot_time_mem_read: std::time::Duration::from_secs(0),
                 bot_time_think: std::time::Duration::from_secs(0),
                 bot_time_play: std::time::Duration::from_secs(0),
@@ -88,7 +98,10 @@ impl Application for AiInterface {
             Message::AttachedChanged(new_attached) => {
                 self.attached = Some(new_attached);
             }
-            Message::AutoResetChecked(state) => self.auto_reset = state,
+            Message::EnabledChanged(state) => self.enabled = state,
+            Message::AutoResetChanged(state) => self.auto_reset = state,
+            Message::ShootFreqChanged(freq) => self.shoot_frequency = freq,
+            Message::ModeChanged(mode) => self.mode = mode,
             Message::UpdateZumaGameState => {
                 if let Some(true) = self.attached {
                     self.zuma_reader.update_frog_follow_eyes();
@@ -104,42 +117,48 @@ impl Application for AiInterface {
                 if let Some(true) = self.attached {
                     let before = std::time::Instant::now();
 
-                    // Find the zuma window
-                    let zuma_win = self.win_manager.active_win().unwrap();
-                    let (zuma_win_x, zuma_win_y, _, _) =
-                        self.win_manager.win_geometry(zuma_win).unwrap();
-
-                    self.window_find_time = before.elapsed();
+                    // Find the zuma
+                    if self.win_coords.is_none() {
+                        let zuma_win = self.win_manager.active_win().unwrap();
+                        if !"Zuma Deluxe 1.0"
+                            .contains(&self.win_manager.win_name(zuma_win).unwrap_or("".into()))
+                        {
+                            return Command::none();
+                        }
+                        let (zuma_win_x, zuma_win_y, _, _) =
+                            self.win_manager.win_geometry(zuma_win).unwrap();
+                        self.win_coords = Some((zuma_win_x, zuma_win_y))
+                    }
 
                     self.zuma_reader.update_balls();
                     self.zuma_reader.update_frog();
-                    if self.zuma_reader.frog.is_none() {
+                    if !self.enabled || self.zuma_reader.frog.is_none() {
                         return Command::none();
                     }
 
-                    self.bot_time_mem_read = before.elapsed() - self.window_find_time;
-                    let bot_shot = bot::suggest_shot_color(
-                        self.zuma_reader.frog.unwrap(),
+                    self.bot_time_mem_read = before.elapsed();
+                    let bot_shot = bot::suggest_shot(
+                        &self.zuma_reader.frog.unwrap(),
                         &self.zuma_reader.game_state,
+                        self.mode,
                     );
                     self.bot_move = bot_shot;
 
-                    self.bot_time_think =
-                        before.elapsed() - self.window_find_time - self.bot_time_mem_read;
+                    self.bot_time_think = before.elapsed() - self.bot_time_mem_read;
 
                     self.zuma_reader.update_paused();
                     if self.zuma_reader.paused {
                         if self.auto_reset && self.zuma_reader.game_state.balls.len() == 0 {
                             // We've lost, attempt to restart automatically
-                            let click_x = zuma_win_x - 1 as i32 + BACK_TO_MENU_COORDS.0;
-                            let click_y = zuma_win_y - 38 + BACK_TO_MENU_COORDS.1;
+                            let click_x =
+                                self.win_coords.unwrap().0 - 1 as i32 + BACK_TO_MENU_COORDS.0;
+                            let click_y = self.win_coords.unwrap().1 - 38 + BACK_TO_MENU_COORDS.1;
                             mki::Mouse::Left.click_at(click_x as i32, click_y as i32);
 
                             std::thread::sleep_ms(1000);
 
-                            // We've lost, attempt to restart automatically
-                            let click_x = zuma_win_x - 1 as i32 + NEW_GAME_COORDS.0;
-                            let click_y = zuma_win_y - 38 + NEW_GAME_COORDS.1;
+                            let click_x = self.win_coords.unwrap().0 - 1 as i32 + NEW_GAME_COORDS.0;
+                            let click_y = self.win_coords.unwrap().1 - 38 + NEW_GAME_COORDS.1;
                             mki::Mouse::Left.click_at(click_x as i32, click_y as i32);
                         }
                         return Command::none();
@@ -148,23 +167,25 @@ impl Application for AiInterface {
                     match bot_shot {
                         bot::BotMove::Shoot(point) => {
                             // Click on the coordinates
-                            let click_x = zuma_win_x - 1 as i32 + point.x.clamp(0., 640.) as i32;
-                            let click_y = zuma_win_y - 38 + point.y.clamp(0., 480.) as i32;
+                            let click_x = self.win_coords.unwrap().0 - 1 as i32
+                                + point.x.clamp(0., 640.) as i32;
+                            let click_y =
+                                self.win_coords.unwrap().1 - 38 + point.y.clamp(0., 470.) as i32;
                             mki::Mouse::Left.click_at(click_x as i32, click_y as i32)
                         }
                         bot::BotMove::SwapShoot(point) => {
                             mki::Mouse::Right.click();
-                            let click_x = zuma_win_x - 1 as i32 + point.x.clamp(0., 640.) as i32;
-                            let click_y = zuma_win_y - 38 + point.y.clamp(0., 480.) as i32;
+                            let click_x = self.win_coords.unwrap().0 - 1 as i32
+                                + point.x.clamp(0., 640.) as i32;
+                            let click_y =
+                                self.win_coords.unwrap().1 - 38 + point.y.clamp(0., 470.) as i32;
                             mki::Mouse::Left.click_at(click_x as i32, click_y as i32)
                         }
                         _ => {}
                     }
 
-                    self.bot_time_play = before.elapsed()
-                        - self.window_find_time
-                        - self.bot_time_mem_read
-                        - self.bot_time_think;
+                    self.bot_time_play =
+                        before.elapsed() - self.bot_time_mem_read - self.bot_time_think;
                     self.bot_time_total = before.elapsed();
                 }
             }
@@ -180,24 +201,41 @@ impl Application for AiInterface {
             None => "Not attached",
         };
 
-        let mut content = row!(attached_text).padding(10).spacing(10);
+        let mut attached_options = row!(attached_text).padding(10).spacing(10);
 
-        if let None | Some(false) = self.attached {
+        let bot_options = if let None | Some(false) = self.attached {
             let button = Button::new("Try attaching to Zuma")
                 .padding(12)
                 .on_press(Message::TryAttach);
 
-            content = content.push(button);
+            attached_options = attached_options.push(button);
+            column![]
+                .padding(10)
+                .spacing(10)
+                .width(Length::FillPortion(1))
         } else {
-            let checkbox = checkbox("Auto reset", self.auto_reset, Message::AutoResetChecked);
-            content = content.push(checkbox);
-        }
+            let enabled_checkbox = checkbox("Bot enabled", self.enabled, Message::EnabledChanged);
+            let reset_checkbox = checkbox("Auto reset", self.auto_reset, Message::AutoResetChanged);
+            let mode_text = Text::new(format!("Bot mode: "));
+            let mode_choice =
+                PickList::new(bot::BotMode::ALL, Some(self.mode), Message::ModeChanged);
+            let freq_text = Text::new(format!("Shoot every: {} ms", self.shoot_frequency));
+            let freqslider =
+                Slider::new(200..=1000, self.shoot_frequency, Message::ShootFreqChanged);
+            column![
+                enabled_checkbox,
+                reset_checkbox,
+                row![mode_text, mode_choice],
+                freq_text,
+                freqslider
+            ]
+            .padding(10)
+            .spacing(10)
+            .width(Length::FillPortion(1))
+        };
 
         let stats = column![
-            Text::new(format!(
-                "Finding the window took: {}ms",
-                self.window_find_time.as_micros()
-            )),
+            Text::new("Stats"),
             Text::new(format!(
                 "Memory reading took: {}ms",
                 self.bot_time_mem_read.as_micros()
@@ -211,21 +249,24 @@ impl Application for AiInterface {
                 self.bot_time_play.as_micros()
             )),
             Text::new(format!("Total: {}ms", self.bot_time_total.as_micros())),
-        ];
+        ]
+        .width(Length::FillPortion(1));
 
         let ball_display = Canvas::new(self)
             .width(Length::Fixed(640.))
             .height(Length::Fixed(480.));
 
-        column![content, stats, ball_display].into()
+        column![attached_options, row![stats, bot_options], ball_display].into()
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
         let refresh_screen =
             iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::RefreshCanvas);
 
-        let bot_sub =
-            iced::time::every(std::time::Duration::from_millis(235)).map(|_| Message::PlayBot);
+        let bot_sub = iced::time::every(std::time::Duration::from_millis(
+            self.shoot_frequency.into(),
+        ))
+        .map(|_| Message::PlayBot);
 
         Subscription::batch([refresh_screen, bot_sub])
     }
