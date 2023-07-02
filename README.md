@@ -25,14 +25,12 @@ This AI does not have any machine learning, it does not improve on its own. Its 
 
 ## Drawbacks
 The AI lacks many things, some of which are listed here:
-### Awareness of the balls' speed 
-Because of this the AI does not "shoot ahead" to anticipate the balls' movement during the travel time of the ball it is shooting.
-
-This is mitigated by the "accuracy" powerup as it causes the balls to have less travel time.
 ### Awareness of the balls that are in flight
 Because of this the AI sometimes shoots twice in the same spot, popping a group of balls and immediately replacing it by a ball of the same color.
 
-This is especially unsatisfying when it prevents a combo from continuing
+This also means that although there is an attempt to predict the movement of the balls during the travel time, balls that land in that time and move the other balls are not taken into account.
+
+This is especially unsatisfying when it prevents a combo from continuing.
 ### Knowledge of powerups that the balls contain
 This means that the AI will treat balls that have powerups like any other ball.
 ### Knowledge of the bonuses that sometimes spawn on the map
