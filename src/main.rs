@@ -47,6 +47,7 @@ pub struct AiInterface {
     auto_reset: bool,
     shoot_frequency: u32, // in ms
     mode: bot::BotMode,
+    memo: Vec<bot::Shot>,
 
     // Time that the bot took to play/think its move
     bot_time_mem_read: std::time::Duration,
@@ -75,6 +76,7 @@ impl Application for AiInterface {
                 auto_reset: false,
                 shoot_frequency: 250,
                 mode: bot::BotMode::ColorBot,
+                memo: vec![],
                 bot_time_mem_read: std::time::Duration::from_secs(0),
                 bot_time_think: std::time::Duration::from_secs(0),
                 bot_time_play: std::time::Duration::from_secs(0),
@@ -141,6 +143,7 @@ impl Application for AiInterface {
                         &self.zuma_reader.frog.unwrap(),
                         &self.zuma_reader.game_state,
                         self.mode,
+                        &mut self.memo,
                     );
                     self.bot_move = bot_shot;
 
@@ -306,7 +309,7 @@ impl<Message> canvas::Program<Message> for AiInterface {
             if let Some(frog) = self.zuma_reader.frog {
                 let frog_pos = iced::Point::new(frog.location.x, frog.location.y);
                 frame.fill_text(canvas::Text {
-                    content: format!("{:?}", frog.active_ball),
+                    content: format!("{:?}", frog.active_ball.color),
                     position: frog_pos,
                     color: Color::WHITE,
                     ..Default::default()

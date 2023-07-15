@@ -299,8 +299,8 @@ impl ZumaReader {
                     x: mem_frog.target_x as f32,
                     y: mem_frog.target_y as f32,
                 },
-                active_ball: active_ball.color,
-                next_ball: next_ball.color,
+                active_ball: active_ball,
+                next_ball: next_ball,
                 ball_exit_speed: mem_frog.ball_exit_speed,
             })
         }

@@ -27,10 +27,22 @@ impl std::fmt::Display for BotMode {
     }
 }
 
-pub fn suggest_shot(frog: &Frog, state: &GameState, mode: BotMode) -> BotMove {
+pub struct Shot {
+    ball_id: u32,   // Id of the ball that was shot
+    target_id: u32, // Id of the target ball
+    shot_time: std::time::Instant,
+    expected_travel_time: std::time::Duration,
+}
+
+pub fn suggest_shot(
+    frog: &Frog,
+    state: &GameState,
+    mode: BotMode,
+    memo: &mut Vec<Shot>,
+) -> BotMove {
     match mode {
-        BotMode::ColorBot => suggest_shot_color(frog, state),
-        BotMode::PalindromeBreaker => suggest_shot_palidrome_simple(frog, state),
+        BotMode::ColorBot => suggest_shot_color(frog, state, memo),
+        BotMode::PalindromeBreaker => suggest_shot_palidrome_simple(frog, state, memo),
     }
 }
 
@@ -146,7 +158,12 @@ fn find_palidromes(balls: &GameState) -> Vec<Palindrome> {
 // Compute the future position of the ball based on travel time
 // TODO: add an adjustment along the normal of the track towards the frog
 // (to make aim better in situations where the track isn't perfectly perpandicular to the frog)
-pub fn adjust_for_travel_time(frog: &Frog, state: &GameState, target_idx: usize) -> Point {
+pub fn adjust_for_travel_time(
+    frog: &Frog,
+    state: &GameState,
+    target_idx: usize,
+    memo: &Vec<Shot>,
+) -> (Point, std::time::Duration) {
     let target_ball = &state.balls[target_idx];
 
     // Compute travel time
@@ -155,51 +172,67 @@ pub fn adjust_for_travel_time(frog: &Frog, state: &GameState, target_idx: usize)
     let dist = dist_sq.sqrt();
     let travel_time = dist / frog.ball_exit_speed;
 
-    // Determine ball speed
-    // TODO: only compute stuff when needed
-    // If reversing and touching the end: backwards speed
-    // else if touching the start: forward speed
-    let mut comparison = &state.balls[0];
-    let gap_before_start = state.balls[..target_idx].iter().any(|ball| {
+    // Determine the start and end indices of the ball group
+    let mut comparison = &state.balls[target_idx];
+    let gap_before_start = state.balls[..target_idx].iter().rposition(|ball| {
         let res = comparison.dist_sq(ball) > 32.5_f32.powi(2);
         comparison = ball;
         res
     });
-    let mut comparison = &state.balls[0];
-    let gap_before_end = state.balls[target_idx..].iter().any(|ball| {
+    let mut comparison = &state.balls[target_idx];
+    let gap_before_end = state.balls[target_idx..].iter().position(|ball| {
         let res = comparison.dist_sq(ball) > 32.5_f32.powi(2);
         comparison = ball;
         res
     });
     let ball_speed = match (
         state.backwards_time_left > 0,
-        gap_before_end,
-        gap_before_start,
+        gap_before_end.is_some(),
+        gap_before_start.is_some(),
     ) {
         (true, false, _) => state.back_speed,
         (false, _, false) => state.forward_speed,
         _ => 0.0,
     };
 
+    // Compute number of balls that will be inserted
+    let mut inserted_balls = 0;
+    for ball in &state.balls[gap_before_start.unwrap_or(0)..target_idx] {
+        if memo.iter().any(|shot| shot.target_id == ball.id) {
+            inserted_balls += 1;
+        }
+    }
+
     // Compute ball distance within that time
-    state
+    let point = state
         .curve
-        .get_pos_from_dist(target_ball.distance_along_path + ball_speed * travel_time)
+        .get_pos_from_dist(target_ball.distance_along_path + ball_speed * travel_time + (inserted_balls as f32) * 32.1);
+
+    (point, std::time::Duration::from_millis((travel_time * 16.) as u64))
 }
 
-pub fn suggest_shot_color(frog: &Frog, state: &GameState) -> BotMove {
-    // Memo contains the last 2 shots that resulted in balls popping
-    // (to avoid reshooting in the same place)
+pub fn suggest_shot_color(frog: &Frog, state: &GameState, memo: &mut Vec<Shot>) -> BotMove {
     if state.balls.len() == 0 {
         return BotMove::Nothing;
     }
 
+    // Update memo:
+    // If the id of the ball that was shot matches one of the balls, remove it
+    // If the ball was shot too long ago, remove it
+    for ball in &state.balls {
+        memo.retain(|shot| {
+            shot.ball_id != ball.id && shot.shot_time.elapsed() < shot.expected_travel_time
+        });
+    }
+
     // Transform the ball sequence into a [(color, count, ball_idx)]
     let mut rle_balls = vec![];
-    for (i, ball) in state.balls.iter().enumerate() {
+    for (i, ball) in state.balls.iter().rev().enumerate() {
+        let i = state.balls.len() - 1 - i;
         match rle_balls.last() {
             Some(&(color, count, _)) if color == ball.color => {
-                (*rle_balls.last_mut().unwrap()).1 = count + 1
+                rle_balls.last_mut().unwrap().1 = count + 1;
+                rle_balls.last_mut().unwrap().2 = i;
             }
             _ => rle_balls.push((ball.color, 1, i)),
         }
@@ -209,7 +242,7 @@ pub fn suggest_shot_color(frog: &Frog, state: &GameState) -> BotMove {
 
     let mut ball_to_shoot = None;
     for (color, count, idx) in rle_balls {
-        if color == frog.active_ball {
+        if color == frog.active_ball.color {
             let ball_group = &state.balls[idx..idx + count];
             let lowest_reachable_pos = reachable_balls
                 .iter()
@@ -229,10 +262,24 @@ pub fn suggest_shot_color(frog: &Frog, state: &GameState) -> BotMove {
         .position(|&ball| ball == reachable_balls[ball_to_shoot])
         .unwrap();
 
-    BotMove::Shoot(adjust_for_travel_time(&frog, state, ball_to_shoot))
+    let (target_point, travel_time) = adjust_for_travel_time(&frog, state, ball_to_shoot, memo);
+
+    // Add ball to memo
+    memo.push(Shot {
+        ball_id: frog.active_ball.id,
+        target_id: state.balls[ball_to_shoot].id,
+        shot_time: std::time::Instant::now(),
+        expected_travel_time: travel_time,
+    });
+
+    BotMove::Shoot(target_point)
 }
 
-pub fn suggest_shot_palidrome_simple(frog: &Frog, state: &GameState) -> BotMove {
+pub fn suggest_shot_palidrome_simple(
+    frog: &Frog,
+    state: &GameState,
+    memo: &mut Vec<Shot>,
+) -> BotMove {
     if state.balls.len() < 4 {
         return BotMove::Nothing;
     }
@@ -244,7 +291,7 @@ pub fn suggest_shot_palidrome_simple(frog: &Frog, state: &GameState) -> BotMove 
     let mut target = None;
     for palindrome in palindromes {
         let palindrome_center = state.balls[palindrome.center];
-        if palindrome_center.color == frog.active_ball
+        if palindrome_center.color == frog.active_ball.color
             && reachable_balls.contains(&palindrome_center)
         {
             target = Some(palindrome_center);
@@ -256,5 +303,5 @@ pub fn suggest_shot_palidrome_simple(frog: &Frog, state: &GameState) -> BotMove 
     // Transform the index into an index of state.balls
     let ball_to_shoot = state.balls.iter().position(|&ball| ball == target).unwrap();
 
-    BotMove::Shoot(adjust_for_travel_time(&frog, state, ball_to_shoot))
+    BotMove::Shoot(adjust_for_travel_time(&frog, state, ball_to_shoot, memo).0)
 }

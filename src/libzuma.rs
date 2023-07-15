@@ -57,7 +57,7 @@ impl GameState {
             balls: vec![],
             curve: Curve::new(),
             forward_speed: 0.,
-            back_speed: -0.5,
+            back_speed: -1.,
             backwards_time_left: 0,
         }
     }
@@ -96,8 +96,8 @@ pub enum FrogType {
 #[derive(Clone, Copy, Debug)]
 pub struct Frog {
     pub location: Point,
-    pub active_ball: BallColor,
-    pub next_ball: BallColor,
+    pub active_ball: Ball,
+    pub next_ball: Ball,
     pub ball_exit_speed: f32,
 }
 
@@ -161,12 +161,14 @@ impl Curve {
     }
 }
 
+#[allow(dead_code)]
 #[derive(BinRead)]
 struct BinCurveTunnelData {
     is_tunnel: u8,
     unk2: u8, // Possibly a z thing to define tunnels
 }
 
+#[allow(dead_code)]
 #[derive(BinRead)]
 struct BinCurvePoint {
     x: u32,
@@ -174,6 +176,7 @@ struct BinCurvePoint {
     tunnel_data: BinCurveTunnelData,
 }
 
+#[allow(dead_code)]
 #[derive(BinRead)]
 struct BinCurveDelta {
     x: i8,
@@ -181,6 +184,7 @@ struct BinCurveDelta {
     tunnel_data: BinCurveTunnelData,
 }
 
+#[allow(dead_code)]
 #[derive(BinRead)]
 #[br(magic = b"CURV")]
 struct BinCurve {
