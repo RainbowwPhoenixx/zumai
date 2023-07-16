@@ -61,7 +61,7 @@ impl Neg for Point {
 
 impl Mul<f32> for Point {
     type Output = Self;
-    
+
     fn mul(self, rhs: f32) -> Self {
         Self {
             x: self.x * rhs,
@@ -79,7 +79,7 @@ impl MulAssign<f32> for Point {
 
 impl Mul<Point> for f32 {
     type Output = Point;
-    
+
     fn mul(self, point: Point) -> Point {
         Point {
             x: point.x * self,
@@ -176,8 +176,8 @@ pub struct Frog {
 #[derive(Clone, Debug)]
 pub struct Curve {
     last_loaded: String,
-    // Vector of (distance along path, point)
     pub points: Vec<Point>,
+    is_tunnel: Vec<bool>,
 }
 
 impl Curve {
@@ -185,6 +185,7 @@ impl Curve {
         Self {
             last_loaded: "".into(),
             points: vec![],
+            is_tunnel: vec![],
         }
     }
 
@@ -211,14 +212,25 @@ impl Curve {
             })
             .collect();
 
+        self.is_tunnel = curve
+            .deltas
+            .iter()
+            .map(|p| p.tunnel_data.is_tunnel != 0)
+            .collect();
+
         Some(())
     }
 
     // Return the position at the given distance from the start
-    pub fn get_pos_from_dist(&self, dist: f32) -> Point {
+    pub fn get_pos_at_dist(&self, dist: f32) -> Point {
         // This trick works only because the points are exactly 1 unit apart
         let idx = (dist as usize).min(self.points.len() - 1);
         self.points[idx]
+    }
+
+    pub fn get_tunnel_at_dist(&self, dist: f32) -> bool {
+        let idx = (dist as usize).min(self.points.len() - 1);
+        self.is_tunnel[idx]
     }
 
     pub fn get_normal_at_dist(&self, dist: f32) -> Point {

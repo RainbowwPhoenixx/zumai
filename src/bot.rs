@@ -50,10 +50,16 @@ pub fn suggest_shot(
 pub fn reachable_balls(frog: &Frog, balls: &GameState) -> Vec<Ball> {
     let mut reachable_balls = vec![];
 
-    for ball_src in balls.balls.iter() {
+    let non_tunnel_balls: Vec<_> = balls
+        .balls
+        .iter()
+        .filter(|ball| !balls.curve.get_tunnel_at_dist(ball.distance_along_path))
+        .collect();
+
+    for &ball_src in &non_tunnel_balls {
         let mut ball_has_line_of_sight = true;
-        for ball_obstacle in balls.balls.iter() {
-            if ball_src == ball_obstacle {
+        for ball_obstacle in &non_tunnel_balls {
+            if &ball_src == ball_obstacle {
                 continue;
             }
 
@@ -196,7 +202,7 @@ pub fn adjust_for_travel_time(
         + ball_speed * travel_time
         + (inserted_balls as f32) * 32.1;
 
-    let point = state.curve.get_pos_from_dist(ball_distance);
+    let point = state.curve.get_pos_at_dist(ball_distance);
 
     (point, Duration::from_millis((travel_time * 16.) as u64))
 }
