@@ -1,4 +1,5 @@
 use binrw::BinRead;
+use std::ops::{Add, Mul, MulAssign, Neg, Sub};
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum BallColor {
@@ -25,6 +26,83 @@ pub struct Point {
     pub y: f32,
 }
 
+impl Add for Point {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+}
+
+impl Sub for Point {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        Self {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+}
+
+impl Neg for Point {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Self {
+            x: -self.x,
+            y: -self.y,
+        }
+    }
+}
+
+impl Mul<f32> for Point {
+    type Output = Self;
+    
+    fn mul(self, rhs: f32) -> Self {
+        Self {
+            x: self.x * rhs,
+            y: self.y * rhs,
+        }
+    }
+}
+
+impl MulAssign<f32> for Point {
+    fn mul_assign(&mut self, rhs: f32) {
+        self.x *= rhs;
+        self.y *= rhs;
+    }
+}
+
+impl Mul<Point> for f32 {
+    type Output = Point;
+    
+    fn mul(self, point: Point) -> Point {
+        Point {
+            x: point.x * self,
+            y: point.y * self,
+        }
+    }
+}
+
+impl Point {
+    pub fn dot(&self, other: &Point) -> f32 {
+        self.x * other.x + self.y * other.y
+    }
+
+    pub fn dist_sq(&self, other: &Point) -> f32 {
+        let diff = *self - *other;
+        diff.x.powf(2.) + diff.y.powf(2.)
+    }
+
+    pub fn dist(&self, other: &Point) -> f32 {
+        self.dist_sq(other).sqrt()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ball {
     pub coordinates: Point,
@@ -33,13 +111,6 @@ pub struct Ball {
     pub effect: BallEffect,
     pub distance_along_path: f32,
     pub id: u32,
-}
-
-impl Ball {
-    pub fn dist_sq(&self, other: &Ball) -> f32 {
-        (self.coordinates.x - other.coordinates.x).powf(2.)
-            + (self.coordinates.y - other.coordinates.y).powf(2.)
-    }
 }
 
 #[derive(Clone, Debug)]

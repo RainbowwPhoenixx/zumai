@@ -1,4 +1,5 @@
 use crate::libzuma::*;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy)]
 pub enum BotMove {
@@ -30,8 +31,8 @@ impl std::fmt::Display for BotMode {
 pub struct Shot {
     ball_id: u32,   // Id of the ball that was shot
     target_id: u32, // Id of the target ball
-    shot_time: std::time::Instant,
-    expected_travel_time: std::time::Duration,
+    shot_time: Instant,
+    expected_travel_time: Duration,
 }
 
 pub fn suggest_shot(
@@ -56,26 +57,15 @@ pub fn reachable_balls(frog: &Frog, balls: &GameState) -> Vec<Ball> {
                 continue;
             }
 
-            let src_vec = Point {
-                x: ball_src.coordinates.x - frog.location.x,
-                y: ball_src.coordinates.y - frog.location.y,
-            };
-            let obstacle_vec = Point {
-                x: ball_obstacle.coordinates.x - frog.location.x,
-                y: ball_obstacle.coordinates.y - frog.location.y,
-            };
+            let src_vec = ball_src.coordinates - frog.location;
+            let obstacle_vec = ball_obstacle.coordinates - frog.location;
 
-            let k_leeway = 27. / (src_vec.x * obstacle_vec.x + src_vec.y * obstacle_vec.y).sqrt();
+            let k_leeway = 27. / src_vec.dot(&obstacle_vec).abs().sqrt();
 
-            let k = (src_vec.x * obstacle_vec.x + src_vec.y * obstacle_vec.y)
-                / (src_vec.x.powi(2) + src_vec.y.powi(2));
-            let projected_point = Point {
-                x: frog.location.x + k * src_vec.x,
-                y: frog.location.y + k * src_vec.y,
-            };
+            let k = src_vec.dot(&obstacle_vec) / src_vec.dot(&src_vec);
+            let projected_point = frog.location + k * src_vec;
 
-            let dist_sq_circle_to_line = (projected_point.x - ball_obstacle.coordinates.x).powi(2)
-                + (projected_point.y - ball_obstacle.coordinates.y).powi(2);
+            let dist_sq_circle_to_line = projected_point.dist_sq(&ball_obstacle.coordinates);
             let radius_sq = 32_f32.powi(2);
             if dist_sq_circle_to_line < radius_sq && k_leeway < k && k < 1. - k_leeway {
                 ball_has_line_of_sight = false;
@@ -124,7 +114,7 @@ fn find_palidromes(balls: &GameState) -> Vec<Palindrome> {
     for (i, ball) in balls.balls.iter().enumerate() {
         match rle_balls.last() {
             Some(&(color, count, _)) if color == ball.color => {
-                (*rle_balls.last_mut().unwrap()).1 = count + 1
+                rle_balls.last_mut().unwrap().1 = count + 1
             }
             _ => rle_balls.push((ball.color, 1, i)),
         }
@@ -162,27 +152,25 @@ pub fn adjust_for_travel_time(
     frog: &Frog,
     state: &GameState,
     target_idx: usize,
-    memo: &Vec<Shot>,
-) -> (Point, std::time::Duration) {
+    memo: &[Shot],
+) -> (Point, Duration) {
     let target_ball = &state.balls[target_idx];
 
     // Compute travel time
-    let dist_sq = (frog.location.x - target_ball.coordinates.x).powi(2)
-        + (frog.location.y - target_ball.coordinates.y).powi(2);
-    let dist = dist_sq.sqrt();
+    let dist = frog.location.dist(&target_ball.coordinates);
     let travel_time = dist / frog.ball_exit_speed;
 
     // Determine the start and end indices of the ball group
-    let mut comparison = &state.balls[target_idx];
+    let mut comparison = &state.balls[target_idx].coordinates;
     let gap_before_start = state.balls[..target_idx].iter().rposition(|ball| {
-        let res = comparison.dist_sq(ball) > 32.5_f32.powi(2);
-        comparison = ball;
+        let res = comparison.dist_sq(&ball.coordinates) > 32.5_f32.powi(2);
+        comparison = &ball.coordinates;
         res
     });
-    let mut comparison = &state.balls[target_idx];
+    let mut comparison = &state.balls[target_idx].coordinates;
     let gap_before_end = state.balls[target_idx..].iter().position(|ball| {
-        let res = comparison.dist_sq(ball) > 32.5_f32.powi(2);
-        comparison = ball;
+        let res = comparison.dist_sq(&ball.coordinates) > 32.5_f32.powi(2);
+        comparison = &ball.coordinates;
         res
     });
     let ball_speed = match (
@@ -204,15 +192,17 @@ pub fn adjust_for_travel_time(
     }
 
     // Compute ball distance within that time
-    let point = state
-        .curve
-        .get_pos_from_dist(target_ball.distance_along_path + ball_speed * travel_time + (inserted_balls as f32) * 32.1);
+    let ball_distance = target_ball.distance_along_path
+        + ball_speed * travel_time
+        + (inserted_balls as f32) * 32.1;
 
-    (point, std::time::Duration::from_millis((travel_time * 16.) as u64))
+    let point = state.curve.get_pos_from_dist(ball_distance);
+
+    (point, Duration::from_millis((travel_time * 16.) as u64))
 }
 
 pub fn suggest_shot_color(frog: &Frog, state: &GameState, memo: &mut Vec<Shot>) -> BotMove {
-    if state.balls.len() == 0 {
+    if state.balls.is_empty() {
         return BotMove::Nothing;
     }
 
@@ -238,7 +228,7 @@ pub fn suggest_shot_color(frog: &Frog, state: &GameState, memo: &mut Vec<Shot>) 
         }
     }
     rle_balls.sort_by_key(|k| -(k.1 as i32));
-    let reachable_balls = reachable_balls(&frog, state);
+    let reachable_balls = reachable_balls(frog, state);
 
     let mut ball_to_shoot = None;
     for (color, count, idx) in rle_balls {
@@ -246,7 +236,7 @@ pub fn suggest_shot_color(frog: &Frog, state: &GameState, memo: &mut Vec<Shot>) 
             let ball_group = &state.balls[idx..idx + count];
             let lowest_reachable_pos = reachable_balls
                 .iter()
-                .position(|ball| ball_group.contains(&ball));
+                .position(|ball| ball_group.contains(ball));
             if let Some(best_pos) = lowest_reachable_pos {
                 ball_to_shoot = Some(best_pos);
                 break;
@@ -262,29 +252,25 @@ pub fn suggest_shot_color(frog: &Frog, state: &GameState, memo: &mut Vec<Shot>) 
         .position(|&ball| ball == reachable_balls[ball_to_shoot])
         .unwrap();
 
-    let (target_point, travel_time) = adjust_for_travel_time(&frog, state, ball_to_shoot, memo);
+    let (target_point, travel_time) = adjust_for_travel_time(frog, state, ball_to_shoot, memo);
 
     // Add ball to memo
     memo.push(Shot {
         ball_id: frog.active_ball.id,
         target_id: state.balls[ball_to_shoot].id,
-        shot_time: std::time::Instant::now(),
+        shot_time: Instant::now(),
         expected_travel_time: travel_time,
     });
 
     BotMove::Shoot(target_point)
 }
 
-pub fn suggest_shot_palidrome_simple(
-    frog: &Frog,
-    state: &GameState,
-    memo: &mut Vec<Shot>,
-) -> BotMove {
+pub fn suggest_shot_palidrome_simple(frog: &Frog, state: &GameState, memo: &mut [Shot]) -> BotMove {
     if state.balls.len() < 4 {
         return BotMove::Nothing;
     }
 
-    let reachable_balls = reachable_balls(&frog, state);
+    let reachable_balls = reachable_balls(frog, state);
     let mut palindromes = find_palidromes(state);
     palindromes.sort_by_key(|k| -(k.get_breaking_len() as i32));
 
@@ -303,5 +289,5 @@ pub fn suggest_shot_palidrome_simple(
     // Transform the index into an index of state.balls
     let ball_to_shoot = state.balls.iter().position(|&ball| ball == target).unwrap();
 
-    BotMove::Shoot(adjust_for_travel_time(&frog, state, ball_to_shoot, memo).0)
+    BotMove::Shoot(adjust_for_travel_time(frog, state, ball_to_shoot, memo).0)
 }

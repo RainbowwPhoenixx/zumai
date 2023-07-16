@@ -299,8 +299,8 @@ impl ZumaReader {
                     x: mem_frog.target_x as f32,
                     y: mem_frog.target_y as f32,
                 },
-                active_ball: active_ball,
-                next_ball: next_ball,
+                active_ball,
+                next_ball,
                 ball_exit_speed: mem_frog.ball_exit_speed,
             })
         }
@@ -361,7 +361,7 @@ impl Read for ScannableProc {
 
             let data = DataMember::<[u8; READ_STEP]>::new_offset(proc, vec![self.reader_cursor]);
             buf[idx..idx + READ_STEP].copy_from_slice(&data.read().unwrap_or([0; READ_STEP]));
-            self.reader_cursor = self.reader_cursor + READ_STEP;
+            self.reader_cursor += READ_STEP;
         }
 
         for idx in 0..remainder {
@@ -371,7 +371,7 @@ impl Read for ScannableProc {
 
             let data = DataMember::new_offset(proc, vec![self.reader_cursor]);
             buf[idx] = data.read().unwrap_or(0);
-            self.reader_cursor = self.reader_cursor + 1;
+            self.reader_cursor += 1;
         }
 
         Ok(buf.len())

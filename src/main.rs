@@ -9,7 +9,6 @@ use iced::{
     Application, Color, Command, Element, Length, Rectangle, Settings, Subscription, Theme,
 };
 use libwmctl::WmCtl;
-use mki;
 mod libzuma;
 
 fn main() -> iced::Result {
@@ -19,8 +18,8 @@ fn main() -> iced::Result {
     })
 }
 
-const BACK_TO_MENU_COORDS: (i32, i32) = (320, 360);
-const NEW_GAME_COORDS: (i32, i32) = (320, 450);
+const BACK_TO_MENU_COORDS: libzuma::Point = libzuma::Point { x: 320., y: 360. };
+const NEW_GAME_COORDS: libzuma::Point = libzuma::Point { x: 320., y: 450. };
 
 #[derive(Clone, Debug)]
 pub enum Message {
@@ -151,38 +150,22 @@ impl Application for AiInterface {
 
                     self.zuma_reader.update_paused();
                     if self.zuma_reader.paused {
-                        if self.auto_reset && self.zuma_reader.game_state.balls.len() == 0 {
+                        if self.auto_reset && self.zuma_reader.game_state.balls.is_empty() {
                             // We've lost, attempt to restart automatically
-                            let click_x =
-                                self.win_coords.unwrap().0 - 1 as i32 + BACK_TO_MENU_COORDS.0;
-                            let click_y = self.win_coords.unwrap().1 - 38 + BACK_TO_MENU_COORDS.1;
-                            mki::Mouse::Left.click_at(click_x as i32, click_y as i32);
-
-                            std::thread::sleep_ms(1000);
-
-                            let click_x = self.win_coords.unwrap().0 - 1 as i32 + NEW_GAME_COORDS.0;
-                            let click_y = self.win_coords.unwrap().1 - 38 + NEW_GAME_COORDS.1;
-                            mki::Mouse::Left.click_at(click_x as i32, click_y as i32);
+                            self.click(BACK_TO_MENU_COORDS);
+                            std::thread::sleep(std::time::Duration::from_secs(1));
+                            self.click(NEW_GAME_COORDS);
                         }
                         return Command::none();
                     }
 
                     match bot_shot {
                         bot::BotMove::Shoot(point) => {
-                            // Click on the coordinates
-                            let click_x = self.win_coords.unwrap().0 - 1 as i32
-                                + point.x.clamp(0., 640.) as i32;
-                            let click_y =
-                                self.win_coords.unwrap().1 - 38 + point.y.clamp(0., 470.) as i32;
-                            mki::Mouse::Left.click_at(click_x as i32, click_y as i32)
+                            self.click(point);
                         }
                         bot::BotMove::SwapShoot(point) => {
                             mki::Mouse::Right.click();
-                            let click_x = self.win_coords.unwrap().0 - 1 as i32
-                                + point.x.clamp(0., 640.) as i32;
-                            let click_y =
-                                self.win_coords.unwrap().1 - 38 + point.y.clamp(0., 470.) as i32;
-                            mki::Mouse::Left.click_at(click_x as i32, click_y as i32)
+                            self.click(point);
                         }
                         _ => {}
                     }
@@ -219,7 +202,7 @@ impl Application for AiInterface {
         } else {
             let enabled_checkbox = checkbox("Bot enabled", self.enabled, Message::EnabledChanged);
             let reset_checkbox = checkbox("Auto reset", self.auto_reset, Message::AutoResetChanged);
-            let mode_text = Text::new(format!("Bot mode: "));
+            let mode_text = Text::new("Bot mode: ".to_string());
             let mode_choice =
                 PickList::new(bot::BotMode::ALL, Some(self.mode), Message::ModeChanged);
             let freq_text = Text::new(format!("Shoot every: {} ms", self.shoot_frequency));
@@ -272,6 +255,16 @@ impl Application for AiInterface {
         .map(|_| Message::PlayBot);
 
         Subscription::batch([refresh_screen, bot_sub])
+    }
+}
+
+impl AiInterface {
+    // click on the given point (in zuma frame of reference)
+    fn click(&self, point: libzuma::Point) {
+        mki::Mouse::Left.click_at(
+            self.win_coords.unwrap().0 - 1 + point.x.clamp(0., 635.) as i32,
+            self.win_coords.unwrap().1 - 38 + point.y.clamp(0., 475.) as i32,
+        );
     }
 }
 
@@ -330,7 +323,7 @@ impl<Message> canvas::Program<Message> for AiInterface {
                             ..Stroke::default()
                         };
 
-                        frame.stroke(&line, stroke);
+                        frame.stroke(line, stroke);
                     }
                     _ => {}
                 }
