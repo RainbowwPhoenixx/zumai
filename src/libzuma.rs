@@ -1,5 +1,5 @@
 use binrw::BinRead;
-use std::ops::{Add, Mul, MulAssign, Neg, Sub};
+use std::ops::{Add, Mul, MulAssign, Div, Neg, Sub};
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum BallColor {
@@ -59,6 +59,17 @@ impl Neg for Point {
     }
 }
 
+impl Div<f32> for Point {
+    type Output = Self;
+
+    fn div(self, rhs: f32) -> Self {
+        Self {
+            x: self.x / rhs,
+            y: self.y / rhs,
+        }
+    }
+}
+
 impl Mul<f32> for Point {
     type Output = Self;
 
@@ -100,6 +111,10 @@ impl Point {
 
     pub fn dist(&self, other: &Point) -> f32 {
         self.dist_sq(other).sqrt()
+    }
+
+    pub fn unit(&self) -> Point {
+        *self / self.dot(&self).sqrt()
     }
 }
 

@@ -204,7 +204,14 @@ pub fn adjust_for_travel_time(
 
     let point = state.curve.get_pos_at_dist(ball_distance);
 
-    (point, Duration::from_millis((travel_time * 16.) as u64))
+    let mut normal = state.curve.get_normal_at_dist(ball_distance).unit();
+    if normal.dot(&(point - frog.location)) < 0. {
+        normal *= -15.;
+    } else {
+        normal *= 15.;
+    }
+
+    (point - normal, Duration::from_millis((travel_time * 17.) as u64))
 }
 
 pub fn suggest_shot_color(frog: &Frog, state: &GameState, memo: &mut Vec<Shot>) -> BotMove {
