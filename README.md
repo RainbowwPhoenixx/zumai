@@ -35,11 +35,7 @@ However, it does attempt to compensate for the balls that land during flight of 
 This means that the AI will treat balls that have powerups like any other ball.
 ### Knowledge of the bonuses that sometimes spawn on the map
 When the AI collects a bonus, it is purely accidental, generally due to one of problems mentionned above
-### Knowledge of tunnels
-The AI treats balls that are in tunnels the same as any other ball, which can cause issues when it tries to shoot them.
 ### Balls going backwards
 The AI is able to predict future position of the balls based on their forward speed, or backwards speed when it is caused by a powerup or a level change.
 
 However, for balls going backwars when balls of the same color are seperated by a gap, it currently doesn't know how to compensate and shoots as if the balls were stationary
-### Shooting at the ball's centers
-When the AI shoots, it tries to shoot to the center of the ball it wants to hit, when it should be aiming at the side. This problem is apparent when the ball track is not perpandicular to the frog, as the balls might hit the side of a ball that is slightly in front before hitting the center of the intended ball.
